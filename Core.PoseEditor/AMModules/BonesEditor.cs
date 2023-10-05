@@ -49,6 +49,23 @@ namespace HSPE.AMModules
                 originalScale = other.originalScale;
             }
         }
+        private class TreeNode
+        {
+            public GameObject Go { get; set; }
+            public int ChildCount { get; set; }
+            public int Indent { get; set; }
+            public string DisplayedName { get; set; }
+            public bool Aliased { get; set; }
+
+            public TreeNode(GameObject go, int childCount, int indent, string displayedName, bool aliased)
+            {
+                Go = go;
+                ChildCount = childCount;
+                Indent = indent;
+                DisplayedName = displayedName;
+                Aliased = aliased;
+            }
+        }
         #endregion
 
         #region Private Variables
@@ -85,6 +102,7 @@ namespace HSPE.AMModules
         private bool _removeShortcutMode;
         private readonly HashSet<GameObject> _openedBones = new HashSet<GameObject>();
         private bool _drawGizmos = true;
+        private List<TreeNode> objectTree;
 
         private static readonly List<VectorLine> _cubeDebugLines = new List<VectorLine>();
         #endregion
@@ -264,59 +282,6 @@ namespace HSPE.AMModules
             return null;
         }
 
-        private class TreeNode
-        {
-            public GameObject Go { get; set; }
-            public int ChildCount { get; set; }
-            public int Indent { get; set; }
-            public string DisplayedName { get; set; }
-            public bool Aliased { get; set; }
-
-            public TreeNode(GameObject go, int childCount, int indent, string displayedName, bool aliased)
-            {
-                Go = go;
-                ChildCount = childCount;
-                Indent = indent;
-                DisplayedName = displayedName;
-                Aliased = aliased;
-            }
-        }
-        private List<TreeNode> children;
-
-        internal void GetObjectTree()
-        {
-            children = new List<TreeNode>();
-
-            void BuildTree(GameObject go, int indent)
-            {
-                if (_parent._childObjects.Contains(go))
-                    return;
-                bool aliased = true;
-                if (_boneAliases.TryGetValue(go.name, out string displayedName) == false)
-                {
-                    displayedName = go.name;
-                    aliased = false;
-                }
-
-                if (_search.Length == 0 || WildCardSearch(go.name, _search) || (aliased && WildCardSearch(displayedName, _search)))
-                {
-                    int childCount = 0;
-                    for (int i = 0; i < go.transform.childCount; ++i)
-                        if (_parent._childObjects.Contains(go.transform.GetChild(i).gameObject) == false)
-                            ++childCount;
-
-                    children.Add(new TreeNode(go, childCount, indent, displayedName, aliased));
-                }
-
-                if (_search.Length != 0 || _openedBones.Contains(go))
-                    for (int i = 0; i < go.transform.childCount; ++i)
-                        BuildTree(go.transform.GetChild(i).gameObject, indent + 1);
-            }
-
-            foreach (Transform child in _parent.transform)
-                BuildTree(child.gameObject, 0);
-        }
-
         public override void GUILogic()
         {
             GUILayout.BeginHorizontal();
@@ -342,8 +307,8 @@ namespace HSPE.AMModules
             GUILayout.EndHorizontal();
             _boneEditionScroll = GUILayout.BeginScrollView(_boneEditionScroll, GUI.skin.box, GUILayout.ExpandHeight(true));
 
-            if (_search != oldSearch || children == null)
-                GetObjectTree();
+            if (_search != oldSearch || objectTree == null)
+                BuildObjectTree();
             DisplayObjectTree();
 
             GUILayout.EndScrollView();
@@ -1295,9 +1260,43 @@ namespace HSPE.AMModules
             return Regex.IsMatch(text, regex, RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
 
+        private void BuildObjectTree()
+        {
+            objectTree = new List<TreeNode>();
+
+            void BuildTree(GameObject go, int indent)
+            {
+                if (_parent._childObjects.Contains(go))
+                    return;
+                bool aliased = true;
+                if (_boneAliases.TryGetValue(go.name, out string displayedName) == false)
+                {
+                    displayedName = go.name;
+                    aliased = false;
+                }
+
+                if (_search.Length == 0 || WildCardSearch(go.name, _search) || (aliased && WildCardSearch(displayedName, _search)))
+                {
+                    int childCount = 0;
+                    for (int i = 0; i < go.transform.childCount; ++i)
+                        if (_parent._childObjects.Contains(go.transform.GetChild(i).gameObject) == false)
+                            ++childCount;
+
+                    objectTree.Add(new TreeNode(go, childCount, indent, displayedName, aliased));
+                }
+
+                if (_search.Length != 0 || _openedBones.Contains(go))
+                    for (int i = 0; i < go.transform.childCount; ++i)
+                        BuildTree(go.transform.GetChild(i).gameObject, indent + 1);
+            }
+
+            foreach (Transform child in _parent.transform)
+                BuildTree(child.gameObject, 0);
+        }
+
         private void DisplayObjectTree()
         {
-            foreach (TreeNode node in children)
+            foreach (TreeNode node in objectTree)
             {
                 Color c = GUI.color;
                 if (_dirtyBones.ContainsKey(node.Go))
