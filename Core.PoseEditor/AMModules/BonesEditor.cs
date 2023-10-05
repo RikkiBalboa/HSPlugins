@@ -264,6 +264,59 @@ namespace HSPE.AMModules
             return null;
         }
 
+        private class TreeNode
+        {
+            public GameObject Go { get; set; }
+            public int ChildCount { get; set; }
+            public int Indent { get; set; }
+            public string DisplayedName { get; set; }
+            public bool Aliased { get; set; }
+
+            public TreeNode(GameObject go, int childCount, int indent, string displayedName, bool aliased)
+            {
+                Go = go;
+                ChildCount = childCount;
+                Indent = indent;
+                DisplayedName = displayedName;
+                Aliased = aliased;
+            }
+        }
+        private List<TreeNode> children;
+
+        internal void GetObjectTree()
+        {
+            children = new List<TreeNode>();
+
+            void BuildTree(GameObject go, int indent)
+            {
+                if (_parent._childObjects.Contains(go))
+                    return;
+                bool aliased = true;
+                if (_boneAliases.TryGetValue(go.name, out string displayedName) == false)
+                {
+                    displayedName = go.name;
+                    aliased = false;
+                }
+
+                if (_search.Length == 0 || WildCardSearch(go.name, _search) || (aliased && WildCardSearch(displayedName, _search)))
+                {
+                    int childCount = 0;
+                    for (int i = 0; i < go.transform.childCount; ++i)
+                        if (_parent._childObjects.Contains(go.transform.GetChild(i).gameObject) == false)
+                            ++childCount;
+
+                    children.Add(new TreeNode(go, childCount, indent, displayedName, aliased));
+                }
+
+                if (_search.Length != 0 || _openedBones.Contains(go))
+                    for (int i = 0; i < go.transform.childCount; ++i)
+                        BuildTree(go.transform.GetChild(i).gameObject, indent + 1);
+            }
+
+            foreach (Transform child in _parent.transform)
+                BuildTree(child.gameObject, 0);
+        }
+
         public override void GUILogic()
         {
             GUILayout.BeginHorizontal();
@@ -288,10 +341,11 @@ namespace HSPE.AMModules
             }
             GUILayout.EndHorizontal();
             _boneEditionScroll = GUILayout.BeginScrollView(_boneEditionScroll, GUI.skin.box, GUILayout.ExpandHeight(true));
-            foreach (Transform child in _parent.transform)
-            {
-                DisplayObjectTree(child.gameObject, 0);
-            }
+
+            if (_search != oldSearch || children == null)
+                GetObjectTree();
+            DisplayObjectTree();
+
             GUILayout.EndScrollView();
             GUILayout.BeginHorizontal();
             GUILayout.Label("Alias", GUILayout.ExpandWidth(false));
@@ -1241,61 +1295,48 @@ namespace HSPE.AMModules
             return Regex.IsMatch(text, regex, RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
 
-        private void DisplayObjectTree(GameObject go, int indent)
+        private void DisplayObjectTree()
         {
-            if (_parent._childObjects.Contains(go))
-                return;
-            string displayedName;
-            bool aliased = true;
-            if (_boneAliases.TryGetValue(go.name, out displayedName) == false)
-            {
-                displayedName = go.name;
-                aliased = false;
-            }
-
-            if (_search.Length == 0 || WildCardSearch(go.name, _search) || (aliased && WildCardSearch(displayedName, _search)))
+            foreach (TreeNode node in children)
             {
                 Color c = GUI.color;
-                if (_dirtyBones.ContainsKey(go))
+                if (_dirtyBones.ContainsKey(node.Go))
                     GUI.color = Color.magenta;
-                if (_parent._collidersEditor._colliders.ContainsKey(go.transform))
+                if (_parent._collidersEditor._colliders.ContainsKey(node.Go.transform))
                     GUI.color = CollidersEditor._colliderColor;
-                if (_boneTarget == go.transform)
+                if (_boneTarget == node.Go.transform)
                     GUI.color = Color.cyan;
                 GUILayout.BeginHorizontal();
                 if (_search.Length == 0)
                 {
-                    GUILayout.Space(indent * 20f);
+                    GUILayout.Space(node.Indent * 20f);
                     int childCount = 0;
-                    for (int i = 0; i < go.transform.childCount; ++i)
-                        if (_parent._childObjects.Contains(go.transform.GetChild(i).gameObject) == false)
+                    for (int i = 0; i < node.Go.transform.childCount; ++i)
+                        if (_parent._childObjects.Contains(node.Go.transform.GetChild(i).gameObject) == false)
                             ++childCount;
                     if (childCount != 0)
                     {
-                        if (GUILayout.Toggle(_openedBones.Contains(go), "", GUILayout.ExpandWidth(false)))
+                        if (GUILayout.Toggle(_openedBones.Contains(node.Go), "", GUILayout.ExpandWidth(false)))
                         {
-                            if (_openedBones.Contains(go) == false)
-                                _openedBones.Add(go);
+                            if (_openedBones.Contains(node.Go) == false)
+                                _openedBones.Add(node.Go);
                         }
                         else
                         {
-                            if (_openedBones.Contains(go))
-                                _openedBones.Remove(go);
+                            if (_openedBones.Contains(node.Go))
+                                _openedBones.Remove(node.Go);
                         }
                     }
                     else
                         GUILayout.Space(20f);
                 }
-                if (GUILayout.Button(displayedName + (_dirtyBones.ContainsKey(go) ? "*" : ""), GUILayout.ExpandWidth(false)))
+                if (GUILayout.Button(node.DisplayedName + (_dirtyBones.ContainsKey(node.Go) ? "*" : ""), GUILayout.ExpandWidth(false)))
                 {
-                    ChangeBoneTarget(go.transform);
+                    ChangeBoneTarget(node.Go.transform);
                 }
                 GUI.color = c;
                 GUILayout.EndHorizontal();
             }
-            if (_search.Length != 0 || _openedBones.Contains(go))
-                for (int i = 0; i < go.transform.childCount; ++i)
-                    DisplayObjectTree(go.transform.GetChild(i).gameObject, indent + 1);
         }
 
         private TransformData SetBoneDirty(GameObject go)
